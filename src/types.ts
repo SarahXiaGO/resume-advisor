@@ -6,6 +6,16 @@ export interface ResumeSection {
   feedback: string[];
   improvements: string[];
   strengths: string[];
+  annotations?: Annotation[];
+}
+
+export interface Annotation {
+  id: string;
+  sectionName: string;
+  highlightText: string;
+  comment: string;
+  type: 'strength' | 'warning' | 'critical' | 'suggestion';
+  color: string;
 }
 
 export interface ResumeScore {
@@ -17,6 +27,10 @@ export interface ResumeScore {
   atsCompatibility: number;
   industryFit: number;
   readabilityScore: number;
+  hfKeywordsFound: string[];
+  hfKeywordsMissing: string[];
+  annotations: Annotation[];
+  scoringRationale?: string;
 }
 
 export interface KnowledgeEntry {
@@ -37,17 +51,18 @@ export interface KnowledgeBase {
   lastUpdated: number;
 }
 
-export const JOB_POSITIONS = [
-  { value: 'software-engineer', label: 'Software Engineer', icon: '💻' },
-  { value: 'product-manager', label: 'Product Manager', icon: '📋' },
-  { value: 'data-scientist', label: 'Data Scientist', icon: '📊' },
-  { value: 'ux-designer', label: 'UX Designer', icon: '🎨' },
-  { value: 'marketing-manager', label: 'Marketing Manager', icon: '📣' },
-  { value: 'financial-analyst', label: 'Financial Analyst', icon: '💹' },
-  { value: 'project-manager', label: 'Project Manager', icon: '🗂️' },
-  { value: 'devops-engineer', label: 'DevOps Engineer', icon: '⚙️' },
-  { value: 'sales-executive', label: 'Sales Executive', icon: '🤝' },
-  { value: 'hr-manager', label: 'HR Manager', icon: '👥' },
-  { value: 'business-analyst', label: 'Business Analyst', icon: '📈' },
-  { value: 'cybersecurity-analyst', label: 'Cybersecurity Analyst', icon: '🔐' },
+export const HF_POSITIONS = [
+  { value: 'analyst', label: 'Research Analyst', icon: '🔬', description: 'Fundamental & quantitative research' },
+  { value: 'portfolio_manager', label: 'Portfolio Manager', icon: '📊', description: 'Portfolio construction & PM support' },
+  { value: 'quant', label: 'Quant Analyst', icon: '⚡', description: 'Quantitative strategies & models' },
+  { value: 'ir', label: 'Investor Relations', icon: '🤝', description: 'LP communication & fundraising' },
+  { value: 'risk', label: 'Risk Analyst', icon: '🛡️', description: 'Risk management & monitoring' },
+  { value: 'macro', label: 'Macro Analyst', icon: '🌐', description: 'Global macro & top-down research' },
 ];
+
+export const ANNOTATION_COLORS: Record<string, string> = {
+  strength: '#22c55e',
+  warning: '#f59e0b',
+  critical: '#ef4444',
+  suggestion: '#6366f1',
+};

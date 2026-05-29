@@ -1,83 +1,120 @@
-import { ResumeScore, ResumeSection } from './types';
-import { kbService } from './knowledgeBase';
+import { ResumeScore, Annotation, ANNOTATION_COLORS } from './types';
+import { loadKeywords, loadScoringCriteria, loadAdviceBank, loadTopRatedResumes } from './supabaseClient';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
-function buildSystemPrompt(position: string): string {
-  const kbContext = kbService.getRelevantContext(position);
+async function buildSystemPrompt(position: string): Promise<string> {
+  const [keywords, criteria, advice, topRated] = await Promise.all([
+    loadKeywords(position),
+    loadScoringCriteria(position),
+    loadAdviceBank(position),
+    loadTopRatedResumes(position),
+  ]);
 
-  return `You are an expert resume advisor and career coach specializing in ${position} roles. You have deep knowledge of hiring practices, ATS systems, and what recruiters look for.
+  const keywordList = keywords.slice(0, 30).join(', ');
+  const criteriaText = criteria.map((c: any) =>
+    `Section: ${c.section}\nCriteria: ${JSON.stringify(c.criteria, null, 2)}`
+  ).join('\n\n');
+  const adviceText = advice.slice(0, 8).map((a: any) =>
+    `[${a.section}] ${a.advice_text}`
+  ).join('\n');
+  const rlhfContext = topRated.length > 0
+    ? `\n\nLEARNED FROM TOP-RATED ANALYSES:\n` + topRated.map((r: any) =>
+        `Rating ${r.user_rating}/5 — scores: ${JSON.stringify(r.section_scores)}`
+      ).join('\n')
+    : '';
 
-Your task is to analyze resumes and provide:
-1. Numerical scores (0-100) for each section
-2. Specific, actionable feedback
-3. Concrete improvement suggestions
+  return `You are an elite hedge fund career advisor and resume expert, specializing in helping undergraduates and new graduates break into hedge funds (analyst, quant, PM, IR, risk, macro roles).
 
-You MUST respond with valid JSON only. No markdown, no explanation outside the JSON.
+You have deep knowledge of what top funds like Citadel, Two Sigma, Bridgewater, Point72, D.E. Shaw, Millennium look for.
 
-${kbContext}
+## HEDGE FUND KEYWORDS TO DETECT
+${keywordList}
 
-Return this exact JSON structure:
+## SCORING RUBRIC FOR ${position.toUpperCase()}
+${criteriaText || 'Use standard HF analyst criteria: investment thinking, quantitative rigor, finance tools, measurable outcomes.'}
+
+## EXPERT ADVICE CONTEXT
+${adviceText}
+${rlhfContext}
+
+## YOUR TASK
+Analyze the resume deeply. Return ONLY valid JSON — no markdown, no explanation outside JSON.
+
+Return this exact structure:
 {
-  "overall": <number 0-100>,
-  "atsCompatibility": <number 0-100>,
-  "industryFit": <number 0-100>,
-  "readabilityScore": <number 0-100>,
-  "summary": "<2-3 sentence overall assessment>",
-  "keyStrengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
-  "criticalImprovements": ["<improvement 1>", "<improvement 2>", "<improvement 3>"],
-  "scoringRationale": "<brief explanation of how you scored this resume>",
+  "overall": <0-100>,
+  "atsCompatibility": <0-100>,
+  "industryFit": <0-100>,
+  "readabilityScore": <0-100>,
+  "summary": "<3 sentence expert assessment from HF recruiter perspective>",
+  "keyStrengths": ["<strength>", "<strength>", "<strength>"],
+  "criticalImprovements": ["<improvement>", "<improvement>", "<improvement>"],
+  "hfKeywordsFound": ["<keyword found in resume>"],
+  "hfKeywordsMissing": ["<important keyword missing>"],
+  "scoringRationale": "<brief scoring explanation>",
+  "annotations": [
+    {
+      "id": "ann_1",
+      "sectionName": "<section name>",
+      "highlightText": "<exact short text from resume to highlight, max 80 chars>",
+      "comment": "<specific expert comment on this text>",
+      "type": "<strength|warning|critical|suggestion>"
+    }
+  ],
   "sections": [
     {
       "name": "Contact & Header",
       "score": <0-100>,
       "maxScore": 100,
-      "feedback": ["<specific observation>"],
+      "feedback": ["<observation>"],
       "improvements": ["<actionable fix>"],
-      "strengths": ["<what works well>"]
+      "strengths": ["<what works>"]
     },
     {
       "name": "Professional Summary",
       "score": <0-100>,
       "maxScore": 100,
-      "feedback": ["<specific observation>"],
+      "feedback": ["<observation>"],
       "improvements": ["<actionable fix>"],
-      "strengths": ["<what works well>"]
+      "strengths": ["<what works>"]
     },
     {
       "name": "Work Experience",
       "score": <0-100>,
       "maxScore": 100,
-      "feedback": ["<specific observation>"],
+      "feedback": ["<observation>"],
       "improvements": ["<actionable fix>"],
-      "strengths": ["<what works well>"]
+      "strengths": ["<what works>"]
     },
     {
       "name": "Skills & Technologies",
       "score": <0-100>,
       "maxScore": 100,
-      "feedback": ["<specific observation>"],
+      "feedback": ["<observation>"],
       "improvements": ["<actionable fix>"],
-      "strengths": ["<what works well>"]
+      "strengths": ["<what works>"]
     },
     {
       "name": "Education",
       "score": <0-100>,
       "maxScore": 100,
-      "feedback": ["<specific observation>"],
+      "feedback": ["<observation>"],
       "improvements": ["<actionable fix>"],
-      "strengths": ["<what works well>"]
+      "strengths": ["<what works>"]
     },
     {
       "name": "Achievements & Impact",
       "score": <0-100>,
       "maxScore": 100,
-      "feedback": ["<specific observation>"],
+      "feedback": ["<observation>"],
       "improvements": ["<actionable fix>"],
-      "strengths": ["<what works well>"]
+      "strengths": ["<what works>"]
     }
   ]
-}`;
+}
+
+Be brutally honest. HF standards are extremely high. A good score (80+) should be rare for new grads.`;
 }
 
 export async function analyzeResume(
@@ -86,7 +123,7 @@ export async function analyzeResume(
   apiKey: string,
   onStream?: (partial: string) => void
 ): Promise<ResumeScore> {
-  const userMessage = `Please analyze this resume for a ${position} position:\n\n${resumeText}`;
+  const systemPrompt = await buildSystemPrompt(position);
 
   const response = await fetch(API_URL, {
     method: 'POST',
@@ -97,9 +134,9 @@ export async function analyzeResume(
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      system: buildSystemPrompt(position),
-      messages: [{ role: 'user', content: userMessage }],
+      max_tokens: 3000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Analyze this resume for a ${position} position at a hedge fund:\n\n${resumeText}` }],
       stream: !!onStream,
     }),
   });
@@ -110,7 +147,6 @@ export async function analyzeResume(
   }
 
   let jsonText = '';
-
   if (onStream && response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -118,8 +154,7 @@ export async function analyzeResume(
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value);
-      const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
-      for (const line of lines) {
+      for (const line of chunk.split('\n').filter(l => l.startsWith('data: '))) {
         try {
           const data = JSON.parse(line.slice(6));
           if (data.type === 'content_block_delta' && data.delta?.text) {
@@ -134,20 +169,16 @@ export async function analyzeResume(
     jsonText = data.content[0].text;
   }
 
-  // Parse JSON
   const clean = jsonText.replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(clean);
 
-  // Store in knowledge base
-  kbService.addEntry({
-    position,
-    resumeSnippet: resumeText.slice(0, 300),
-    scoringRationale: parsed.scoringRationale || '',
-    sectionScores: Object.fromEntries(
-      (parsed.sections || []).map((s: ResumeSection) => [s.name, s.score])
-    ),
-    feedback: parsed.criticalImprovements?.join('; ') || '',
-  });
+  // Enrich annotations with color
+  if (parsed.annotations) {
+    parsed.annotations = parsed.annotations.map((ann: Annotation) => ({
+      ...ann,
+      color: ANNOTATION_COLORS[ann.type] || ANNOTATION_COLORS.suggestion,
+    }));
+  }
 
   return parsed as ResumeScore;
 }
