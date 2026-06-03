@@ -1,11 +1,22 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL!;
-const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Don't crash the whole app at import time if Supabase isn't configured —
+// DB-backed features (keyword bank, history) degrade gracefully instead.
+export const supabase: SupabaseClient | null =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+if (!supabase) {
+  console.warn(
+    '[supabaseClient] REACT_APP_SUPABASE_URL / REACT_APP_SUPABASE_ANON_KEY not set — ' +
+    'database features disabled. Add them to .env and restart `npm start`.'
+  );
+}
 
 export async function loadKeywords(position: string): Promise<string[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from('keywords')
     .select('word')
@@ -16,6 +27,7 @@ export async function loadKeywords(position: string): Promise<string[]> {
 }
 
 export async function loadScoringCriteria(position: string): Promise<any[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from('scoring_criteria')
     .select('*')
@@ -25,6 +37,7 @@ export async function loadScoringCriteria(position: string): Promise<any[]> {
 }
 
 export async function loadAdviceBank(position: string): Promise<any[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from('advice_bank')
     .select('*')
@@ -45,6 +58,7 @@ export async function saveResume(payload: {
   ai_feedback: any;
   target_level: string;
 }): Promise<string | null> {
+  if (!supabase) return null;
   const { data, error } = await supabase
     .from('resumes')
     .insert(payload)
@@ -55,6 +69,7 @@ export async function saveResume(payload: {
 }
 
 export async function rateResume(id: string, rating: number, helpful: boolean) {
+  if (!supabase) return;
   await supabase
     .from('resumes')
     .update({ user_rating: rating, helpful })
@@ -62,6 +77,7 @@ export async function rateResume(id: string, rating: number, helpful: boolean) {
 }
 
 export async function loadTopRatedResumes(position: string, limit = 5): Promise<any[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from('resumes')
     .select('section_scores, ai_feedback, user_rating')
@@ -74,6 +90,7 @@ export async function loadTopRatedResumes(position: string, limit = 5): Promise<
 }
 
 export async function getResumeStats(): Promise<any> {
+  if (!supabase) return null;
   const { data, error } = await supabase
     .from('resumes')
     .select('position, overall_score, user_rating, created_at');
