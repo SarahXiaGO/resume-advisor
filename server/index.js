@@ -2,7 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
+const { Readable } = require('stream');
+// Load both .env and .env.local (later files do not override already-set vars)
 require('dotenv').config({ path: path.join(__dirname, '../.env.local') });
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -21,9 +24,14 @@ app.post('/api/parse', upload.single('resume'), async (req, res) => {
     let text = '';
 
     if (mimetype === 'application/pdf' || originalname.endsWith('.pdf')) {
-      const pdfParse = require('pdf-parse');
-      const data = await pdfParse(buffer);
-      text = data.text;
+      const { PDFParse } = require('pdf-parse');
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const result = await parser.getText();
+        text = result.text;
+      } finally {
+        await parser.destroy();
+      }
     } else if (
       mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       originalname.endsWith('.docx')
@@ -63,7 +71,9 @@ app.post('/api/analyze', express.json({ limit: '2mb' }), async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 3000,
+        // Raised from 3000: the structured payload (parsed resume + sections +
+        // annotations + suggestions) overflowed 3000 and truncated the JSON.
+        max_tokens: 8000,
         system,
         messages,
         stream: true,
@@ -75,11 +85,12 @@ app.post('/api/analyze', express.json({ limit: '2mb' }), async (req, res) => {
       return res.status(response.status).json({ error: err });
     }
 
-    // Forward SSE stream to client
+    // Forward SSE stream to client.
+    // Built-in fetch returns a web ReadableStream (no .pipe), so bridge it to a Node stream.
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    response.body.pipe(res);
+    Readable.fromWeb(response.body).pipe(res);
   } catch (err) {
     console.error('Analyze error:', err);
     res.status(500).json({ error: err.message });
