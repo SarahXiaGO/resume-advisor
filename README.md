@@ -1,61 +1,70 @@
-# QuantEdge — Quant Finance Resume Intelligence
+# QuantEdge
 
-> AI-powered resume scoring and advisory platform built for undergraduates and new graduates targeting quant finance roles at hedge funds, prop trading firms, and asset managers.
+**Quant Finance Resume Intelligence Platform**
 
----
-
-## 🏗 Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Student Browser                       │
-│  Upload PDF/DOCX → Select Role → View Scores + Annotations  │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP (localhost:3000)
-┌────────────────────────▼────────────────────────────────────┐
-│                   React Frontend (Port 3000)                 │
-│  - PDF drag & drop upload                                    │
-│  - Role selector (6 quant finance roles)                    │
-│  - Visual inline annotator (color-coded highlights)         │
-│  - Section score cards (A–F grades)                         │
-│  - HF keyword tracker (found vs. missing)                   │
-│  - Star rating → RLHF feedback loop                         │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP (localhost:3001)
-┌────────────────────────▼────────────────────────────────────┐
-│                  Express Backend (Port 3001)                  │
-│  - POST /api/parse   → PDF/DOCX/TXT → plain text            │
-│  - POST /api/analyze → proxies to Anthropic API             │
-│  - Holds API key server-side (never exposed to browser)     │
-└──────────┬─────────────────────────────┬────────────────────┘
-           │                             │
-┌──────────▼──────────┐    ┌─────────────▼──────────────────┐
-│   Anthropic Claude  │    │        Supabase (PostgreSQL)    │
-│   Sonnet 4 API      │    │  - keywords (49 HF signals)     │
-│   Streaming JSON    │    │  - scoring_criteria (rubrics)   │
-└─────────────────────┘    │  - advice_bank (expert tips)    │
-                           │  - resumes (analyses + ratings) │
-                           └────────────────────────────────┘
-```
+QuantEdge is a resume scoring and advisory tool designed for undergraduate students and new graduates targeting roles in quantitative finance. The platform provides structured scoring, section-level feedback, and inline annotations calibrated to the standards of hedge funds and quant trading firms.
 
 ---
 
-## 📁 Project Structure
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Database Schema](#database-schema)
+- [AI System](#ai-system)
+- [Design System](#design-system)
+- [Local Development](#local-development)
+- [API Reference](#api-reference)
+- [Security](#security)
+- [Roadmap](#roadmap)
+
+---
+
+## Architecture
+
+The application follows a three-tier architecture. The React frontend communicates exclusively with the Express backend, which holds all credentials and proxies requests to external services.
+
+```
+Client (Browser)
+    |
+    |  HTTP :3000
+    |
+React Frontend
+    |
+    |  HTTP :3001
+    |
+Express Backend ——— Anthropic Claude API
+    |
+Supabase (PostgreSQL)
+```
+
+**Frontend** (port 3000)
+Handles file upload, role selection, result rendering, and user ratings. Contains no API credentials.
+
+**Backend** (port 3001)
+Parses uploaded files (PDF, DOCX, TXT), holds the Anthropic API key, proxies analysis requests with streaming, and persists results to Supabase.
+
+**Supabase**
+Stores the knowledge base (keywords, scoring criteria, expert advice) and all analysis results. Top-rated results are fed back into future prompts to improve scoring over time.
+
+---
+
+## Project Structure
 
 ```
 resume-advisor/
 ├── public/
 │   └── index.html
 ├── server/
-│   └── index.js          # Express backend — file parsing + API proxy
+│   └── index.js          # Express server — file parsing and API proxy
 ├── src/
-│   ├── App.tsx           # Main UI — 4 views: upload / analyzing / results / stats
-│   ├── App.css           # T Alpha-inspired design system
-│   ├── apiService.ts     # Builds prompts from KB, calls backend, parses response
-│   ├── supabaseClient.ts # All Supabase queries (read KB, save results, ratings)
-│   ├── types.ts          # TypeScript interfaces + HF position definitions
-│   └── index.tsx         # React entry point
-├── .env.local            # 🔒 Secret keys — never committed to git
+│   ├── App.tsx           # Root component — manages all views and state
+│   ├── App.css           # Global styles and design tokens
+│   ├── apiService.ts     # Prompt construction, backend calls, response parsing
+│   ├── supabaseClient.ts # Database queries — knowledge base reads and result writes
+│   ├── types.ts          # TypeScript interfaces and role definitions
+│   └── index.tsx         # Application entry point
+├── .env.local            # Environment variables (not committed)
 ├── .gitignore
 ├── package.json
 └── README.md
@@ -63,94 +72,106 @@ resume-advisor/
 
 ---
 
-## 🗄 Database Schema (Supabase / PostgreSQL)
+## Database Schema
 
-### `keywords`
-Hedge fund signal words scanned in every resume.
+All tables are hosted on Supabase (PostgreSQL) with Row Level Security enabled.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | uuid | Primary key |
-| word | text | e.g. "Sharpe ratio", "DCF", "backtesting" |
-| category | text | investment / technical / metric / tool / quant |
-| position_relevance | text[] | e.g. `['analyst', 'quant']` |
-| weight | integer | 1–5 importance score |
-| created_at | timestamptz | Auto timestamp |
+### keywords
 
-### `scoring_criteria`
-Role-specific rubrics injected into every AI prompt.
+Hedge fund and quant finance signal terms. Scanned against every uploaded resume.
 
 | Column | Type | Description |
-|--------|------|-------------|
+|---|---|---|
 | id | uuid | Primary key |
-| position | text | analyst / quant / portfolio_manager / ir / risk / macro |
-| section | text | Resume section name |
-| criteria | jsonb | `{ must_have[], good_to_have[], red_flags[], weight }` |
+| word | text | Signal term, e.g. "Sharpe ratio", "backtesting" |
+| category | text | investment, technical, metric, tool, quant |
+| position_relevance | text[] | Roles this term applies to |
+| weight | integer | Relevance weight, 1–5 |
+| created_at | timestamptz | |
+
+### scoring_criteria
+
+Role-specific scoring rubrics. Injected into the AI prompt before each analysis.
+
+| Column | Type | Description |
+|---|---|---|
+| id | uuid | Primary key |
+| position | text | analyst, quant, portfolio_manager, ir, risk, macro |
+| section | text | Resume section this rubric applies to |
+| criteria | jsonb | Object containing must_have, good_to_have, red_flags arrays |
 | weight | integer | Section importance weight |
 
-### `advice_bank`
-Curated expert tips by section and role, injected into AI prompt.
+### advice_bank
+
+Curated expert guidance by role and section. Injected into the AI prompt by priority order.
 
 | Column | Type | Description |
-|--------|------|-------------|
+|---|---|---|
 | id | uuid | Primary key |
-| section | text | e.g. "Work Experience", "Professional Summary" |
-| position | text | Role this advice targets (null = all roles) |
-| advice_text | text | Expert guidance paragraph |
-| example | text | Before/after example |
-| priority | integer | 1–5, higher = injected first into prompt |
+| section | text | Resume section, e.g. "Work Experience" |
+| position | text | Target role (null applies to all roles) |
+| advice_text | text | Expert guidance |
+| example | text | Concrete before/after example |
+| priority | integer | Injection priority, 1–5 |
 
-### `resumes`
-Every analysis result saved here. Powers the RLHF learning loop.
+### resumes
+
+Stores every analysis result and user rating. The primary data source for the feedback loop.
 
 | Column | Type | Description |
-|--------|------|-------------|
+|---|---|---|
 | id | uuid | Primary key |
 | position | text | Target role |
-| resume_text | text | Extracted plain text from uploaded file |
-| overall_score | integer | 0–100 |
+| resume_text | text | Extracted plain text |
+| overall_score | integer | Composite score, 0–100 |
 | ats_score | integer | ATS compatibility score |
-| industry_fit | integer | Quant finance fit score |
-| readability_score | integer | Clarity/readability score |
-| section_scores | jsonb | `{ "Work Experience": 72, ... }` |
-| ai_feedback | jsonb | `{ summary, keyStrengths[], criticalImprovements[] }` |
-| user_rating | integer | 1–5 stars submitted by student |
-| helpful | boolean | true if user_rating ≥ 3 |
-| target_level | text | new_grad / sophomore / junior / experienced |
-| created_at | timestamptz | Auto timestamp |
+| industry_fit | integer | Quant finance alignment score |
+| readability_score | integer | Clarity score |
+| section_scores | jsonb | Per-section score map |
+| ai_feedback | jsonb | Summary, strengths, and improvements |
+| user_rating | integer | Student rating, 1–5 |
+| helpful | boolean | True if user_rating >= 3 |
+| target_level | text | new_grad, sophomore, junior, experienced |
+| created_at | timestamptz | |
 
 ---
 
-## 🧠 AI & RLHF System
+## AI System
 
-### How the prompt is built (per analysis)
+### Prompt Construction
 
-Every time a student submits a resume, the system:
+Each analysis request builds a system prompt dynamically from the knowledge base before calling Claude. The construction pipeline:
 
-1. Loads `keywords` for the selected role from Supabase
-2. Loads `scoring_criteria` rubric for that role
-3. Loads top 8 `advice_bank` entries by priority for that role
-4. Loads top 5 highest-rated past `resumes` for that role (`user_rating ≥ 4`)
-5. Injects all of the above into the Claude system prompt as context
-6. Streams Claude's structured JSON response back to the frontend
+1. Load signal keywords for the selected role from `keywords`
+2. Load scoring rubric for the selected role from `scoring_criteria`
+3. Load top-priority advice entries for the selected role from `advice_bank`
+4. Load the five highest-rated past analyses for the selected role from `resumes`
+5. Assemble all of the above into the system prompt
+6. Stream the response from Claude back to the client
 
-### RLHF feedback loop
+### Feedback Loop
+
+User ratings are stored against each analysis record in Supabase. On subsequent analyses for the same role, the highest-rated past results are included in the prompt as learned context. This allows the scoring behavior to improve incrementally without modifying the underlying model.
 
 ```
-Student rates analysis (1–5 stars)
-         ↓
-Saved to resumes.user_rating in Supabase
-         ↓
-Next student analyzes same role
-         ↓
-Top-rated past analyses injected into prompt as "learned context"
-         ↓
-Claude calibrates scoring based on what was rated highly
-         ↓
-Accuracy improves over time without retraining the model
+Analysis submitted
+       |
+Result saved to resumes table
+       |
+Student submits star rating
+       |
+Rating stored on record
+       |
+Next analysis for same role
+       |
+Top-rated records injected as context
+       |
+Scoring calibrated against prior high-quality examples
 ```
 
-### AI response structure (JSON)
+### Response Schema
+
+The model returns a single JSON object. Annotations reference exact substrings from the resume text, enabling the frontend to highlight and attach comments inline.
 
 ```json
 {
@@ -158,29 +179,29 @@ Accuracy improves over time without retraining the model
   "atsCompatibility": 68,
   "industryFit": 75,
   "readabilityScore": 80,
-  "summary": "3-sentence expert assessment...",
-  "keyStrengths": ["strength 1", "strength 2", "strength 3"],
-  "criticalImprovements": ["improvement 1", "improvement 2"],
-  "hfKeywordsFound": ["DCF", "Bloomberg", "Sharpe ratio"],
-  "hfKeywordsMissing": ["backtesting", "factor model", "alpha generation"],
-  "scoringRationale": "Brief explanation of scoring approach",
+  "summary": "string",
+  "keyStrengths": ["string"],
+  "criticalImprovements": ["string"],
+  "hfKeywordsFound": ["string"],
+  "hfKeywordsMissing": ["string"],
+  "scoringRationale": "string",
   "annotations": [
     {
-      "id": "ann_1",
-      "sectionName": "Work Experience",
-      "highlightText": "conducted research on tech sector",
-      "comment": "Vague — no quantified outcome or investment thesis stated",
-      "type": "critical"
+      "id": "string",
+      "sectionName": "string",
+      "highlightText": "string",
+      "comment": "string",
+      "type": "strength | warning | critical | suggestion"
     }
   ],
   "sections": [
     {
-      "name": "Work Experience",
-      "score": 65,
+      "name": "string",
+      "score": 0,
       "maxScore": 100,
-      "feedback": ["observation 1"],
-      "improvements": ["actionable fix 1"],
-      "strengths": ["what works well"]
+      "feedback": ["string"],
+      "improvements": ["string"],
+      "strengths": ["string"]
     }
   ]
 }
@@ -188,54 +209,54 @@ Accuracy improves over time without retraining the model
 
 ---
 
-## 🎨 Design System
+## Design System
 
-Inspired by T Alpha — dark terminal aesthetic for a professional quant finance feel.
+The interface follows a dark terminal aesthetic consistent with the T Alpha product family.
 
-### Color Palette
+### Colors
 
 | Token | Value | Usage |
-|-------|-------|-------|
+|---|---|---|
 | `--bg` | `#0D0D0D` | Page background |
 | `--bg2` | `#111111` | Card background |
-| `--bg3` | `#161616` | Input / nested background |
+| `--bg3` | `#161616` | Input and nested surfaces |
 | `--bg4` | `#1C1C1C` | Hover states |
 | `--border` | `#222222` | Default borders |
-| `--green` | `#00FF85` | Primary accent, CTAs, passing scores |
-| `--gold` | `#E8A020` | Highlights, star ratings, warnings |
-| `--red` | `#FF4444` | Critical issues, failing scores |
+| `--green` | `#00FF85` | Primary accent, CTAs, scores above 80 |
+| `--gold` | `#E8A020` | Secondary accent, ratings, scores 60–79 |
+| `--red` | `#FF4444` | Critical issues, scores below 60 |
 | `--blue` | `#4D9EFF` | Improvement suggestions |
 | `--text` | `#F5F5F5` | Primary text |
 | `--text2` | `#888888` | Secondary text |
-| `--text3` | `#444444` | Muted / placeholder text |
+| `--text3` | `#444444` | Muted text |
 
 ### Typography
 
-| Role | Font | Usage |
-|------|------|-------|
-| Brand / terminal | Space Mono | Logo, section labels, scores, code |
-| Body / UI | Space Grotesk | All readable content, buttons |
+| Role | Family |
+|---|---|
+| Brand, labels, scores, code | Space Mono |
+| Body, UI, buttons | Space Grotesk |
 
-### Annotation Color Coding
+### Annotation Types
 
-| Color | Type | Meaning |
-|-------|------|---------|
-| 🟢 `#00FF85` | `strength` | Something done well — keep it |
-| 🟡 `#E8A020` | `warning` | Could be improved |
-| 🔴 `#FF4444` | `critical` | Must fix before applying |
-| 🔵 `#4D9EFF` | `suggestion` | Nice-to-have addition |
+| Type | Color | Meaning |
+|---|---|---|
+| strength | `#00FF85` | Well-executed element |
+| warning | `#E8A020` | Present but improvable |
+| critical | `#FF4444` | Significant weakness to address |
+| suggestion | `#4D9EFF` | Recommended addition |
 
 ---
 
-## 🚀 Local Development
+## Local Development
 
 ### Prerequisites
-- Node.js 18+
-- npm 9+
-- Supabase project (free tier at supabase.com)
-- Anthropic API key (console.anthropic.com)
 
-### Setup
+- Node.js 18 or later
+- A Supabase project (free tier)
+- An Anthropic API key
+
+### Installation
 
 ```bash
 git clone https://github.com/SarahXiaGO/resume-advisor.git
@@ -245,72 +266,83 @@ npm install
 
 ### Environment Variables
 
-Create `.env.local` in the project root:
+Create a `.env.local` file in the project root:
 
-```env
-REACT_APP_ANTHROPIC_API_KEY=sk-ant-api03-...
-REACT_APP_SUPABASE_URL=https://your-project-id.supabase.co
-REACT_APP_SUPABASE_ANON_KEY=eyJ...
+```
+REACT_APP_ANTHROPIC_API_KEY=sk-ant-...
+REACT_APP_SUPABASE_URL=https://<project-id>.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=<anon-key>
 ```
 
-> ⚠️ Never commit `.env.local` — it's in `.gitignore`
+This file is excluded from version control.
 
-### Run Locally
+### Running the Application
 
 ```bash
-# Run both frontend + backend together
+# Start both servers concurrently
 npm run dev
 
-# Or separately in two terminals:
-node server/index.js    # Backend → http://localhost:3001
-npm start               # Frontend → http://localhost:3000
+# Start servers individually
+node server/index.js    # Backend on port 3001
+npm start               # Frontend on port 3000
 ```
 
 ---
 
-## 📡 API Endpoints
+## API Reference
 
-### `POST /api/parse`
-Accepts a resume file upload, returns extracted plain text.
+### POST /api/parse
 
-- **Content-Type:** `multipart/form-data`
-- **Field:** `resume` (file)
-- **Accepts:** `.pdf`, `.docx`, `.txt` (max 10MB)
-- **Returns:** `{ text: string }`
-- **Errors:** `{ error: string }`
+Accepts a file upload and returns the extracted plain text content.
 
-### `POST /api/analyze`
-Proxies the analysis request to Anthropic Claude with streaming. The API key never leaves the server.
+| | |
+|---|---|
+| Content-Type | multipart/form-data |
+| Field | `resume` (file) |
+| Accepted formats | .pdf, .docx, .txt |
+| Max file size | 10 MB |
 
-- **Content-Type:** `application/json`
-- **Body:** `{ system: string, messages: [{role, content}] }`
-- **Returns:** `text/event-stream` (SSE — Anthropic streaming format)
+Response:
+```json
+{ "text": "string" }
+```
 
-### `GET /api/health`
-Simple health check.
+### POST /api/analyze
 
-- **Returns:** `{ ok: true }`
+Proxies an analysis request to the Anthropic API. Returns a streaming response. The API key is held server-side and is never included in the response or accessible from the client.
+
+| | |
+|---|---|
+| Content-Type | application/json |
+| Body | `{ "system": "string", "messages": [] }` |
+| Response | text/event-stream (Anthropic SSE format) |
+
+### GET /api/health
+
+```json
+{ "ok": true }
+```
 
 ---
 
-## 🔒 Security
+## Security
 
-- **Anthropic API key** — stored in `.env.local`, loaded server-side only, never sent to or accessible from the browser
-- **Supabase anon key** — safe to expose publicly; Row Level Security (RLS) is enabled on all tables
-- **RLS policies** — public read on `keywords`, `advice_bank`, `scoring_criteria`; public insert + read + update on `resumes`
-- **File uploads** — stored in memory only (never written to disk), processed and discarded immediately
-- **`.gitignore`** — excludes `.env.local`, `node_modules/`, `build/`
+**API key isolation.** The Anthropic API key is loaded from the server environment and used only in server-side requests. It is not included in any client-side bundle or API response.
+
+**Supabase RLS.** Row Level Security is enabled on all tables. The anon key exposed to the frontend grants read access to the knowledge base tables and insert access to the resumes table only.
+
+**File handling.** Uploaded files are parsed in memory using `pdf-parse` and `mammoth`. No file data is written to disk or persisted beyond the duration of the parse request.
+
+**Secrets management.** All credentials are stored in `.env.local`, which is listed in `.gitignore` and never committed to version control.
 
 ---
 
-## 🗺 Roadmap
+## Roadmap
 
-- [ ] User authentication (Supabase Auth)
-- [ ] Resume version history per user
-- [ ] Side-by-side before/after resume comparison
-- [ ] Export annotated resume as PDF
-- [ ] Admin dashboard to manage knowledge base content
-- [ ] Deploy frontend → Vercel
-- [ ] Deploy backend → Railway or Render
-- [ ] Add more roles: Credit Analyst, Sales & Trading, Derivatives
-- [ ] Mock interview module (follow-on feature)
+- User authentication via Supabase Auth
+- Per-user resume history and version tracking
+- Side-by-side resume comparison (before and after edits)
+- Annotated resume export as PDF
+- Admin interface for knowledge base management
+- Production deployment: frontend to Vercel, backend to Railway
+- Coverage expansion: Credit Analyst, Sales and Trading, Derivatives roles
